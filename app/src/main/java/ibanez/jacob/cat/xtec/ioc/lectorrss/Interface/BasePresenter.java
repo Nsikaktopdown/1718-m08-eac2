@@ -7,4 +7,5 @@ package ibanez.jacob.cat.xtec.ioc.lectorrss.Interface;
 public interface BasePresenter<T> {
     T getView();
     void onStart();
+
 }

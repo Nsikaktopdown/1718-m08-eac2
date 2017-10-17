@@ -10,6 +10,7 @@ import ibanez.jacob.cat.xtec.ioc.lectorrss.model.RssItem;
 
 public interface MainAcivityView<T> extends BaseView<T> {
 
-    void fetchDataFromServer();
+
     void feedRecyclerView(List<RssItem> rssItemList);
+    void fetchFromDB(List<RssItem> feedList);
 }

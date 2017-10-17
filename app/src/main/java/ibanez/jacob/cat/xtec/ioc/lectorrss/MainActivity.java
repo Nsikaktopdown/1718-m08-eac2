@@ -1,13 +1,11 @@
 package ibanez.jacob.cat.xtec.ioc.lectorrss;
 
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.DividerItemDecoration;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
-import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -17,27 +15,18 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 
-import org.xmlpull.v1.XmlPullParserException;
-
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 
+import ibanez.jacob.cat.xtec.ioc.lectorrss.Interface.MainAcivityContract;
 import ibanez.jacob.cat.xtec.ioc.lectorrss.model.RssItem;
-import ibanez.jacob.cat.xtec.ioc.lectorrss.utils.ConnectionUtils;
+import ibanez.jacob.cat.xtec.ioc.lectorrss.presenter.FetchFeedsPresenter;
 
 /**
  * Main Activity
  *
  * @author <a href="mailto:jacobibanez@jacobibanez.com">Jacob Ibáñez Sánchez</a>.
  */
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements MainAcivityContract.View {
 
     //Tag for logging purposes
     private static final String TAG = MainActivity.class.getSimpleName();
@@ -48,7 +37,9 @@ public class MainActivity extends AppCompatActivity {
     private EditText mSearchQuery;
     private ProgressBar mProgressBar;
     private ItemAdapter mItemAdapter;
-    private DBInterface mDataBase;
+    private MainAcivityContract.Presenter mPresenter;
+    private AppCompatActivity activity;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,7 +53,11 @@ public class MainActivity extends AppCompatActivity {
         mSearchQuery = (EditText) findViewById(R.id.et_search);
         mProgressBar = (ProgressBar) findViewById(R.id.pb_loading_indicator);
         mItemAdapter = new ItemAdapter(this);
-        mDataBase = new DBInterface(this);
+
+        activity = new AppCompatActivity();
+
+
+        new FetchFeedsPresenter(this, getApplicationContext());
 
         //set the layout manager and the adapter of the recycler view
         RecyclerView recyclerView = (RecyclerView) findViewById(R.id.recycler_view);
@@ -82,29 +77,19 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        //feed the recycler view, either from the internet or from the database
-        feedRecyclerView(true);
+
+       //calling the presenter to fetch the data from the server or db
+        mPresenter.performFeedFetch(FEED_CHANNEL, this);
+
+
     }
 
-    private void feedRecyclerView(boolean loadFromDatabase) {
-        //check for internet connection
-        if (ConnectionUtils.hasConnection(this)) {
-            //if there is connection, start the execution of the async task
-            new DownloadRssTask().execute(FEED_CHANNEL);
-        } else {
-            //otherwise, check if you must load data from database or not
-            if (loadFromDatabase) {
-                //fill adapter list from database
-                mDataBase.open();
-                mItemAdapter.setItems(mDataBase.getAllItems());
-                mDataBase.close();
 
-                Toast.makeText(this, R.string.toast_offline_load, Toast.LENGTH_SHORT).show();
-            } else {
-                //you pressed refresh button but there is no connection
-                Toast.makeText(this, R.string.toast_there_is_no_connection, Toast.LENGTH_SHORT).show();
-            }
-        }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        mPresenter.onStart();
     }
 
     @Override
@@ -131,7 +116,7 @@ public class MainActivity extends AppCompatActivity {
         switch (id) {
             case R.id.action_refresh:   //refresh button has been pressed
                 //refresh the recycler view content
-                feedRecyclerView(false);
+                mPresenter.performFeedFetch(FEED_CHANNEL, this);
                 return true;
             case R.id.action_search:    //search button has been pressed
                 //we only have to toggle the search bar
@@ -152,102 +137,40 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * This class is for downloading a XML file from the internet in a background thread
-     */
-    private class DownloadRssTask extends AsyncTask<String, Void, List<RssItem>> {
-        @Override
-        protected void onPreExecute() {
-            super.onPreExecute();
-            //set progress bar visible and hid recycler view, so we are connecting to the internet
+
+    @Override
+    public void showLoading(boolean show) {
+        if (show) {
             mProgressBar.setVisibility(View.VISIBLE);
+        } else {
+            mProgressBar.setVisibility(View.GONE);
         }
 
-        @Override
-        protected List<RssItem> doInBackground(String... strings) {
-            List<RssItem> result = null;
 
-            try {
-                //get the XML from the feed url and process it
-                result = getRssItems(strings[0]);
-                //TODO save to the database all the info of the XML file
-                storeResult(result);
-                //download thumbnails to the cache directory
-                cacheImages(result);
-            } catch (IOException ex) {
-
-            } catch (XmlPullParserException ex) {
-
-            }
-
-            return result;
-        }
-
-        @Override
-        protected void onPostExecute(List<RssItem> items) {
-            //set progress bar invisible and show recycler view, so the result from the internet has arrived
-            mProgressBar.setVisibility(View.INVISIBLE);
-
-            //feed the list of items of the recycler view's adapter
-            mItemAdapter.setItems(items);
-        }
     }
 
-    private void storeResult(List<RssItem> result) {
-        mDataBase.open();
-        for (RssItem item : result) {
-            mDataBase.insertItem(item);
-        }
-        mDataBase.close();
+    @Override
+    public void showErrorMessage(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+
     }
 
-    /**
-     *
-     * @param result
-     */
-    private void cacheImages(List<RssItem> result) {
-        for (RssItem item : result) {
-            try {
-                URL imageUrl = new URL(item.getThumbnail());
-                InputStream inputStream = (InputStream) imageUrl.getContent();
-                byte[] bufferImage = new byte[1024];
+    @Override
+    public void setPresenter(MainAcivityContract.Presenter presenter) {
+        this.mPresenter = presenter;
 
-                OutputStream outputStream = new FileOutputStream(item.getImagePathInCache());
-
-                int count;
-                while ((count = inputStream.read(bufferImage)) != -1) {
-                    outputStream.write(bufferImage, 0, count);
-                }
-
-                inputStream.close();
-                outputStream.close();
-            } catch (IOException ex) {
-                Log.e(TAG, "Error downloading image from " + item.getThumbnail(), ex);
-            }
-        }
     }
 
-    /**
-     *
-     * @param url
-     * @return
-     * @throws IOException
-     * @throws XmlPullParserException
-     */
-    private List<RssItem> getRssItems(String url) throws IOException, XmlPullParserException {
-        InputStream in = null;
-        RssItemParser parser = new RssItemParser(this);
-        List<RssItem> result = null;
 
-        try {
-            in = ConnectionUtils.openHttpConnection(url);
-            result = parser.parse(in);
-        } finally {
-            if (in != null) {
-                in.close();
-            }
-        }
+    @Override
+    public void feedRecyclerView(List<RssItem> rssItemList) {
+        mItemAdapter.setItems(rssItemList);
 
-        return result;
+    }
+
+    @Override
+    public void fetchFromDB(List<RssItem> feedList) {
+        mItemAdapter.setItems(feedList);
+
     }
 }
